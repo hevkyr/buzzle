@@ -1,0 +1,25 @@
+services:
+  api:
+    build: .
+    container_name: buzzle-api
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  web:
+    image: nginx:alpine
+    container_name: buzzle-web
+    ports:
+      - "80:80"
+    volumes:
+      - ./docs:/usr/share/nginx/html:ro
+    depends_on:
+      - api
+    restart: unless-stopped
