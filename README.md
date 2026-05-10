@@ -2,11 +2,18 @@
 
 > **The world's most over-engineered motivational phrase generator.**
 
+[![Live Demo](https://img.shields.io/badge/demo-live-7cf5b0?style=flat-square&logo=github)](https://hevkyr.github.io/buzzle/)
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?style=flat-square&logo=go&logoColor=white)](https://golang.org)
 [![Lua](https://img.shields.io/badge/Lua-5.4-2C2D72?style=flat-square&logo=lua&logoColor=white)](https://lua.org)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED?style=flat-square&logo=docker&logoColor=white)](https://docker.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](LICENSE)
+
+---
+
+## 🌐 Live Demo
+
+**[hevkyr.github.io/buzzle](https://hevkyr.github.io/buzzle/)** — runs entirely in the browser, no install needed.
 
 ---
 

@@ -550,54 +550,183 @@
 
   <footer>
     <p>built by <a href="https://github.com/hevkyr">hevkyr</a> · python + go + lua + docker · MIT</p>
-    <p style="margin-top:6px">API at <a href="http://localhost:8000/docs" target="_blank">localhost:8000/docs</a></p>
+    <p style="margin-top:6px"><a href="https://github.com/hevkyr/buzzle" target="_blank">github.com/hevkyr/buzzle</a> · engine runs locally in your browser</p>
   </footer>
 </div>
 
 <div class="toast" id="toast">copied!</div>
 
 <script>
-  const API = 'http://localhost:8000';
+  // ══════════════════════════════════════════════════════════════════════════
+  //  buzzle engine — offline JS port (no API required)
+  //  identical logic to api/engine.py, runs 100% in the browser
+  // ══════════════════════════════════════════════════════════════════════════
 
-  // ── State ──────────────────────────────────────────────────────────────────
-  let currentCount = 1;
-  let currentPhrase = '';
-  let currentPhrases = [];
-  let useSeed = false;
-  let currentSeed = null;
-  let generating = false;
+  // ── Word banks ─────────────────────────────────────────────────────────────
+  const NOUNS = [
+    "cactus","penguin","developer","spreadsheet","deadline","WiFi",
+    "database","standup","pivot","synergy","bandwidth","roadmap",
+    "kanban","agile","scrum","backlog","notebook","thermostat",
+    "centipede","avocado","algorithm","404","commit","merge",
+    "hotdog","hamster","blockchain","cloud","stack","pipeline",
+    "rubber duck","semicolon","namespace","daemon","socket",
+    "iterator","refactor","dockerfile","linter","grep",
+    "coffee","monitor","keyboard","cursor","variable","function",
+    "exception","timeout","latency","throughput","entropy",
+    "csv","json","yaml","regex","terminal","session",
+    "dependency","abstraction","singleton","mutex","thread",
+    "garbage collector","heap","lobster","flamingo","ferret",
+    "echidna","capybara","sourdough","kombucha","oat milk","intern",
+  ];
 
-  // ── DOM refs ───────────────────────────────────────────────────────────────
-  const phraseText     = document.getElementById('phrase-text');
-  const phraseMeta     = document.getElementById('phrase-meta');
-  const phraseList     = document.getElementById('phrase-list');
-  const singleArea     = document.getElementById('single-area');
-  const scoreBar       = document.getElementById('score-fill');
-  const scoreLabel     = document.getElementById('score-label');
-  const starsEl        = document.getElementById('stars');
-  const categoryBadge  = document.getElementById('category-badge');
-  const btnGen         = document.getElementById('btn-generate');
-  const btnCopy        = document.getElementById('btn-copy');
-  const btnSeed        = document.getElementById('btn-seed');
-  const statusDot      = document.getElementById('status-dot');
-  const statusText     = document.getElementById('status-text');
-  const toast          = document.getElementById('toast');
-  const customPhraseEl = document.getElementById('custom-phrase-text');
+  const VERBS = [
+    "apologizes","refactors","deploys","compiles","pivots",
+    "disrupts","leverages","synergizes","scales","iterates",
+    "optimizes","bootstraps","migrates","containerizes","commits",
+    "branches","merges","rebases","lints","formats",
+    "debugs","logs","monitors","alerts","retries",
+    "timeouts","caches","indexes","queries","joins",
+    "validates","serializes","parses","renders","hydrates",
+    "memoizes","delegates","encapsulates","abstracts","inherits",
+    "overrides","implements","integrates","automates","orchestrates",
+    "provisions","configures","patches","ships","rolls back",
+  ];
 
-  // ── API check ──────────────────────────────────────────────────────────────
-  async function checkAPI() {
-    try {
-      const r = await fetch(API + '/health', { signal: AbortSignal.timeout(3000) });
-      if (r.ok) {
-        statusDot.className = 'status-dot online';
-        statusText.textContent = 'api online · localhost:8000';
-        return true;
-      }
-    } catch (_) {}
-    statusDot.className = 'status-dot offline';
-    statusText.textContent = 'api offline — run: uvicorn main:app';
-    return false;
+  const ADJECTIVES = [
+    "disciplined","caffeinated","confused","agile","distributed",
+    "asynchronous","idempotent","stateless","immutable","resilient",
+    "scalable","observable","containerized","decoupled","abstracted",
+    "overengineered","deprecated","legacy","bleeding-edge","robust",
+    "blazing-fast","cloud-native","data-driven","AI-powered","minimal",
+    "opinionated","verbose","elegant","pragmatic","recursive",
+    "lazy","eager","strict","loosely-coupled","eventually-consistent",
+    "self-healing","fault-tolerant","horizontally-scalable","serverless",
+    "headless","passwordless","frictionless","seamless","effortless",
+  ];
+
+  const PREPOSITIONS = [
+    "to","toward","against","beyond","despite",
+    "through","within","without","alongside","underneath",
+  ];
+
+  const TEMPLATES = [
+    "The {adj} {noun} never {verb} {prep} {noun2}.",
+    "{VERB} harder than your {noun}'s {noun2}.",
+    "A {adj} {noun} still knows its {noun2} encoding.",
+    "Never let a {adj} {noun} {verb} your {noun2}.",
+    "The {noun} that {verb} {prep} {noun2} is already {adj}.",
+    "In a world of {noun2}, be the {adj} {noun}.",
+    "Your {noun} will {verb} {prep} {noun2} before the sprint ends.",
+    "Stay {adj}. Deploy on Fridays. Become the {noun}.",
+  ];
+
+  const CATEGORIES = ["hustle","tech","mindset","chaos","enlightenment"];
+
+  // ── Seeded PRNG (mulberry32) ───────────────────────────────────────────────
+  function makePRNG(seed) {
+    let s = seed >>> 0;
+    return () => {
+      s += 0x6D2B79F5;
+      let t = Math.imul(s ^ s >>> 15, 1 | s);
+      t ^= t + Math.imul(t ^ t >>> 7, 61 | t);
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
   }
+
+  function pick(arr, rng) {
+    return arr[Math.floor(rng() * arr.length)];
+  }
+
+  // ── Profoundness score ────────────────────────────────────────────────────
+  function syllableCount(word) {
+    word = word.toLowerCase().replace(/[^a-z]/g, '');
+    let count = 0, prev = false;
+    for (const ch of word) {
+      const v = 'aeiouy'.includes(ch);
+      if (v && !prev) count++;
+      prev = v;
+    }
+    return Math.max(1, count);
+  }
+
+  function profoundnessScore(phrase, rng) {
+    const words = phrase.split(' ');
+    const syllables = words.reduce((s, w) => s + syllableCount(w), 0);
+    const avgLen = words.reduce((s, w) => s + w.replace(/[^a-z]/gi,'').length, 0) / Math.max(words.length, 1);
+    const noise = Math.floor(rng() * 15);
+    return Math.max(1, Math.min(100, Math.round(syllables * 4.2 + avgLen * 6.1 + noise)));
+  }
+
+  // ── Core generator ────────────────────────────────────────────────────────
+  function generatePhrase({ seed = null, noun = null, verb = null, adjective = null } = {}) {
+    const rng = seed !== null ? makePRNG(seed) : Math.random.bind(Math);
+
+    const n1  = noun      || pick(NOUNS, rng);
+    const n2  = pick(NOUNS.filter(n => n !== n1), rng);
+    const v   = verb      || pick(VERBS, rng);
+    const adj = adjective || pick(ADJECTIVES, rng);
+    const prep = pick(PREPOSITIONS, rng);
+    const tmpl = pick(TEMPLATES, rng);
+
+    let phrase = tmpl
+      .replace('{adj}',  adj)
+      .replace('{noun}', n1)
+      .replace('{noun2}', n2)
+      .replace('{VERB}', v.charAt(0).toUpperCase() + v.slice(1))
+      .replace('{verb}', v)
+      .replace('{prep}', prep);
+
+    phrase = phrase.charAt(0).toUpperCase() + phrase.slice(1);
+    if (!'.!?'.includes(phrase.at(-1))) phrase += '.';
+
+    const score    = profoundnessScore(phrase, rng);
+    const category = pick(CATEGORIES, rng);
+
+    return { phrase, score, category, generated_at: new Date().toISOString() };
+  }
+
+  function generateMultiple(count = 5, seed = null) {
+    count = Math.max(1, Math.min(count, 20));
+    const results = [], seen = new Set();
+    let attempts = 0;
+    while (results.length < count && attempts < count * 5) {
+      const s = seed !== null ? seed + attempts : null;
+      const p = generatePhrase({ seed: s });
+      if (!seen.has(p.phrase)) { seen.add(p.phrase); results.push(p); }
+      attempts++;
+    }
+    return results;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  //  UI
+  // ══════════════════════════════════════════════════════════════════════════
+
+  let currentCount  = 1;
+  let currentPhrase = '';
+  let useSeed       = false;
+  let currentSeed   = null;
+  let generating    = false;
+
+  const phraseText    = document.getElementById('phrase-text');
+  const phraseMeta    = document.getElementById('phrase-meta');
+  const phraseList    = document.getElementById('phrase-list');
+  const singleArea    = document.getElementById('single-area');
+  const scoreBar      = document.getElementById('score-fill');
+  const scoreLabel    = document.getElementById('score-label');
+  const starsEl       = document.getElementById('stars');
+  const categoryBadge = document.getElementById('category-badge');
+  const btnGen        = document.getElementById('btn-generate');
+  const btnCopy       = document.getElementById('btn-copy');
+  const btnSeed       = document.getElementById('btn-seed');
+  const statusDot     = document.getElementById('status-dot');
+  const statusText    = document.getElementById('status-text');
+  const toast         = document.getElementById('toast');
+  const customResult  = document.getElementById('custom-phrase-text');
+
+  // Mark engine as online (no API needed)
+  statusDot.className  = 'status-dot online';
+  statusText.textContent = 'engine online · running locally in your browser';
 
   // ── Helpers ────────────────────────────────────────────────────────────────
   function starsFromScore(score) {
@@ -611,10 +740,8 @@
     setTimeout(() => toast.classList.remove('show'), 2000);
   }
 
-  function setGenerating(state) {
-    generating = state;
-    btnGen.textContent = state ? 'generating' : 'generate';
-    phraseText.classList.toggle('loading', state);
+  function escapeHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
 
   // ── Count buttons ──────────────────────────────────────────────────────────
@@ -624,8 +751,6 @@
     document.querySelectorAll('.count-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     currentCount = parseInt(btn.dataset.count);
-
-    // Toggle display mode
     if (currentCount === 1) {
       singleArea.style.display = 'flex';
       phraseList.style.display = 'none';
@@ -652,32 +777,28 @@
   });
 
   // ── Generate ───────────────────────────────────────────────────────────────
-  btnGen.addEventListener('click', generatePhrase);
+  btnGen.addEventListener('click', run);
 
-  async function generatePhrase() {
+  function run() {
     if (generating) return;
-    const apiOk = await checkAPI();
-    if (!apiOk) { showToast('api offline!'); return; }
+    generating = true;
+    btnGen.textContent = 'generating';
+    phraseText.classList.add('loading');
 
-    setGenerating(true);
-
-    try {
-      let url = `${API}/phrase?count=${currentCount}`;
-      if (currentSeed !== null) url += `&seed=${currentSeed}`;
-
-      const r = await fetch(url);
-      const data = await r.json();
-
-      if (currentCount === 1) {
-        displaySingle(data);
-      } else {
-        displayMultiple(Array.isArray(data) ? data : [data]);
+    // Tiny async delay so the UI updates before the (instant) computation
+    setTimeout(() => {
+      try {
+        if (currentCount === 1) {
+          displaySingle(generatePhrase({ seed: currentSeed }));
+        } else {
+          displayMultiple(generateMultiple(currentCount, currentSeed));
+        }
+      } finally {
+        generating = false;
+        btnGen.textContent = 'generate';
+        phraseText.classList.remove('loading');
       }
-    } catch (e) {
-      phraseText.textContent = 'connection error — is the API running?';
-    } finally {
-      setGenerating(false);
-    }
+    }, 80);
   }
 
   function displaySingle(data) {
@@ -685,18 +806,13 @@
     phraseText.textContent = data.phrase;
     phraseMeta.style.display = 'flex';
     btnCopy.style.display = 'block';
-
     starsEl.textContent = starsFromScore(data.score);
     scoreLabel.textContent = `${data.score}/100`;
     categoryBadge.textContent = data.category;
-
-    requestAnimationFrame(() => {
-      scoreBar.style.width = data.score + '%';
-    });
+    requestAnimationFrame(() => { scoreBar.style.width = data.score + '%'; });
   }
 
   function displayMultiple(phrases) {
-    currentPhrases = phrases;
     phraseList.innerHTML = '';
     phrases.forEach((p, i) => {
       const el = document.createElement('div');
@@ -708,8 +824,7 @@
           <span class="phrase-item-stars">${starsFromScore(p.score)}</span>
           <span>${p.score}/100</span>
           <span>${p.category}</span>
-        </div>
-      `;
+        </div>`;
       el.addEventListener('click', () => {
         navigator.clipboard.writeText(p.phrase);
         showToast('copied!');
@@ -726,43 +841,23 @@
   });
 
   // ── Custom phrase ──────────────────────────────────────────────────────────
-  document.getElementById('btn-custom').addEventListener('click', async () => {
-    const apiOk = await checkAPI();
-    if (!apiOk) { showToast('api offline!'); return; }
-
+  document.getElementById('btn-custom').addEventListener('click', () => {
     const noun = document.getElementById('custom-noun').value.trim() || null;
     const verb = document.getElementById('custom-verb').value.trim() || null;
     const adj  = document.getElementById('custom-adj').value.trim() || null;
 
-    customPhraseEl.textContent = 'generating...';
-    customPhraseEl.style.color = 'var(--muted)';
-
-    try {
-      const r = await fetch(`${API}/phrase/custom`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ noun, verb, adjective: adj }),
-      });
-      const data = await r.json();
-      customPhraseEl.textContent = data.phrase;
-      customPhraseEl.style.color = 'var(--text)';
-    } catch (e) {
-      customPhraseEl.textContent = 'error — check API';
-    }
+    const data = generatePhrase({ noun, verb, adjective: adj });
+    customResult.textContent = data.phrase;
+    customResult.style.color = 'var(--text)';
   });
 
   // ── Keyboard shortcut ──────────────────────────────────────────────────────
   document.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && !e.target.matches('input')) generatePhrase();
+    if (e.key === 'Enter' && !e.target.matches('input')) run();
   });
 
-  // ── Utils ──────────────────────────────────────────────────────────────────
-  function escapeHtml(s) {
-    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-  }
-
-  // ── Init ───────────────────────────────────────────────────────────────────
-  checkAPI();
+  // ── Auto-generate one phrase on load ──────────────────────────────────────
+  run();
 </script>
 </body>
 </html>
